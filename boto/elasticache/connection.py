@@ -412,8 +412,11 @@ class ElastiCacheConnection(AWSQueryConnection):
             params['MaxRecords'] = max_records
         if marker:
             params['Marker'] = marker
-        pg = self.get_object('DescribeCacheParameters', params, ParameterGroup)
+
+        pg =self.get_object('DescribeCacheParameters', params, ParameterGroup)
+
         pg.name = groupname
+
         return pg
 
     def create_parameter_group(self, name, description, family='memcached1.4'):

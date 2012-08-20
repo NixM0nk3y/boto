@@ -1,23 +1,28 @@
 
-class ParameterGroup(dict):
+from boto.resultset import ResultSet
+
+class ParameterGroup(object):
 
     def __init__(self, connection=None):
-        dict.__init__(self)
         self.connection = connection
         self.name = None
         self.description = None
         self.family = None
-        self._current_param = None
+	self.parameters = []
+	self.typespecific_parameters = []
 
     def __repr__(self):
         return 'ParameterGroup:%s' % self.name
 
     def startElement(self, name, attrs, connection):
-        if name == 'Parameter':
-            if self._current_param:
-                self[self._current_param.name] = self._current_param
-            self._current_param = Parameter(self)
-            return self._current_param
+        if name == 'Parameters':
+            self.parameters = ResultSet([('Parameter', Parameter)])
+            return self.parameters
+        elif name == 'CacheNodeTypeSpecificParameters':
+            self.typespecific_parameters = ResultSet([('CacheNodeTypeSpecificParameter', TypeSpecificParameter)])
+            return self.typespecific_parameters
+        else:
+            return None
 
     def endElement(self, name, value, connection):
         if name == 'CacheParameterGroupName':
@@ -31,22 +36,21 @@ class ParameterGroup(dict):
 
     def modifiable(self):
         mod = []
-        for key in self:
-            p = self[key]
+        for p in self.parameters:
             if p.is_modifiable:
                 mod.append(p)
         return mod
 
     def get_params(self):
-        pg = self.connection.get_all_cacheparameters(self.name)
-        self.update(pg)
+        self.parameters = self.connection.get_all_cacheparameters(self.name)
+        return self.parameters
 
     def add_param(self, name, value, apply_method):
         param = Parameter()
         param.name = name
         param.value = value
         param.apply_method = apply_method
-        self.params.append(param)
+        self.parameters.append(param)
 
 class Parameter(object):
     """
@@ -58,8 +62,7 @@ class Parameter(object):
                   'boolean' : bool}
     ValidSources = ['user', 'system', 'engine-default']
 
-    def __init__(self, group=None, name=None):
-        self.group = group
+    def __init__(self, name=None):
         self.name = name
         self._value = None
         self.type = 'string'
@@ -73,7 +76,7 @@ class Parameter(object):
         return 'Parameter:%s' % self.name
 
     def startElement(self, name, attrs, connection):
-        pass
+        return None
 
     def endElement(self, name, value, connection):
         if name == 'ParameterName':
@@ -167,6 +170,70 @@ class Parameter(object):
 
     value = property(get_value, set_value, 'The value of the parameter')
 
-    def apply(self):
-        self.group.connection.modify_parameter_group(self.group.name, [self])
+    def apply(self, group):
+        self.group.connection.modify_parameter_group(group.name, [self])
+
+class TypeSpecificParameter(object):
+    """
+    Represents a Cache  TypeSpecific Parameter
+    """
+
+    ValidTypes = {'integer' : int,
+                  'string' : str,
+                  'boolean' : bool}
+
+    ValidSources = ['user', 'system', 'engine-default']
+
+    def __init__(self, name=None):
+        self.name = name
+        self._value = {}
+        self.type = 'string'
+        self.source = None
+        self.is_modifiable = True
+        self.description = None
+        self.minimum_engine_version = None
+        self.allowed_values = None
+        self._in_specific_value = False
+        self._spec_type = None
+        self._spec_value = None
+
+    def __repr__(self):
+        return 'TypeSpecificParameter:%s' % self.name
+
+    def startElement(self, name, attrs, connection):
+        if name == 'CacheNodeTypeSpecificValue':
+            self._in_specific_value = True
+        return None
+
+    def endElement(self, name, value, connection):
+        if name == 'ParameterName':
+            self.name = value
+        elif name == 'DataType':
+            if value in self.ValidTypes:
+                self.type = value
+        elif name == 'Source':
+            if value in self.ValidSources:
+                self.source = value
+        elif name == 'IsModifiable':
+            if value.lower() == 'true':
+                self.is_modifiable = True
+            else:
+                self.is_modifiable = False
+        elif name == 'Description':
+            self.description = value
+        elif name == 'MinimumEngineVersion':
+            self.minimum_engine_version = value
+        elif name == 'AllowedValues':
+            self.allowed_values = value
+        elif name == 'Value':
+            if self._in_specific_value:
+                self._spec_value = value
+        elif name == 'CacheNodeType':
+            if self._in_specific_value:
+                self._spec_type = value
+        elif name == 'CacheNodeTypeSpecificValue':
+            self._value[ self._spec_type ] = self._spec_value
+            self._in_specific_value = False
+        else:
+            setattr(self, name, value)
 
