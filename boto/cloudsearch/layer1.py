@@ -45,7 +45,8 @@ class Layer1(AWSQueryConnection):
                  proxy=None, proxy_port=None,
                  proxy_user=None, proxy_pass=None, debug=0,
                  https_connection_factory=None, region=None, path='/',
-                 api_version=None, security_token=None):
+                 api_version=None, security_token=None,
+                 validate_certs=True):
         if not region:
             region = RegionInfo(self, self.DefaultRegionName,
                                 self.DefaultRegionEndpoint)
@@ -56,7 +57,8 @@ class Layer1(AWSQueryConnection):
                                     proxy_user, proxy_pass,
                                     self.region.endpoint, debug,
                                     https_connection_factory, path,
-                                    security_token)
+                                    security_token,
+                                    validate_certs=validate_certs)
 
     def _required_auth_capability(self):
         return ['sign-v2']
@@ -399,7 +401,8 @@ class Layer1(AWSQueryConnection):
                     'domain_status_list')
         params = {}
         if domain_names:
-            params['DomainNames'] = domain_names
+            for i, domain_name in enumerate(domain_names, 1):
+                params['DomainNames.member.%d' % i] = domain_name
         return self.get_response(doc_path, 'DescribeDomains',
                                  params, verb='POST',
                                  list_marker='DomainStatusList')
@@ -428,7 +431,8 @@ class Layer1(AWSQueryConnection):
                     'index_fields')
         params = {'DomainName': domain_name}
         if field_names:
-            params['FieldNames'] = field_names
+            for i, field_name in enumerate(field_names, 1):
+                params['FieldNames.member.%d' % i] = field_name
         return self.get_response(doc_path, 'DescribeIndexFields',
                                  params, verb='POST',
                                  list_marker='IndexFields')
@@ -457,7 +461,8 @@ class Layer1(AWSQueryConnection):
                     'rank_expressions')
         params = {'DomainName': domain_name}
         if rank_names:
-            params['RankNames'] = rank_names
+            for i, rank_name in enumerate(rank_names, 1):
+                params['RankNames.member.%d' % i] = rank_name
         return self.get_response(doc_path, 'DescribeRankExpressions',
                                  params, verb='POST',
                                  list_marker='RankExpressions')

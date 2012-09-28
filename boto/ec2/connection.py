@@ -47,6 +47,7 @@ from boto.ec2.regioninfo import RegionInfo
 from boto.ec2.instanceinfo import InstanceInfo
 from boto.ec2.reservedinstance import ReservedInstancesOffering
 from boto.ec2.reservedinstance import ReservedInstance
+from boto.ec2.reservedinstance import ReservedInstanceListing
 from boto.ec2.spotinstancerequest import SpotInstanceRequest
 from boto.ec2.spotpricehistory import SpotPriceHistory
 from boto.ec2.spotdatafeedsubscription import SpotDatafeedSubscription
@@ -63,7 +64,7 @@ from boto.exception import EC2ResponseError
 
 class EC2Connection(AWSQueryConnection):
 
-    APIVersion = boto.config.get('Boto', 'ec2_version', '2012-07-20')
+    APIVersion = boto.config.get('Boto', 'ec2_version', '2012-08-15')
     DefaultRegionName = boto.config.get('Boto', 'ec2_region_name', 'us-east-1')
     DefaultRegionEndpoint = boto.config.get('Boto', 'ec2_region_endpoint',
                                             'ec2.us-east-1.amazonaws.com')
@@ -74,7 +75,8 @@ class EC2Connection(AWSQueryConnection):
                  proxy=None, proxy_port=None,
                  proxy_user=None, proxy_pass=None, debug=0,
                  https_connection_factory=None, region=None, path='/',
-                 api_version=None, security_token=None):
+                 api_version=None, security_token=None,
+                 validate_certs=True):
         """
         Init method to create a new connection to EC2.
         """
@@ -88,22 +90,13 @@ class EC2Connection(AWSQueryConnection):
                                     proxy_user, proxy_pass,
                                     self.region.endpoint, debug,
                                     https_connection_factory, path,
-                                    security_token)
+                                    security_token,
+                                    validate_certs=validate_certs)
         if api_version:
             self.APIVersion = api_version
 
     def _required_auth_capability(self):
         return ['ec2']
-
-    def _credentials_expired(self, response):
-        if response.status != 400:
-            return False
-        error = EC2ResponseError('', '', body=response.read())
-        if error.errors is not None:
-            for code, message in error.errors:
-                if code == 'RequestExpired':
-                    return True
-        return False
 
     def get_params(self):
         """
@@ -971,12 +964,19 @@ class EC2Connection(AWSQueryConnection):
 
         :type product_description: str
         :param product_description: Filter responses to a particular platform.
-            Valid values are currently: "Linux/UNIX", "SUSE Linux",
-            and "Windows"
+            Valid values are currently:
+
+            * Linux/UNIX
+            * SUSE Linux
+            * Windows
+            * Linux/UNIX (Amazon VPC)
+            * SUSE Linux (Amazon VPC)
+            * Windows (Amazon VPC)
 
         :type availability_zone: str
         :param availability_zone: The availability zone for which prices
-            should be returned
+            should be returned.  If not specified, data for all
+            availability zones will be returned.
 
         :rtype: list
         :return: A list tuples containing price and timestamp.
@@ -1377,6 +1377,10 @@ class EC2Connection(AWSQueryConnection):
         This requires one of ``public_ip`` or ``allocation_id`` depending
         on if you're associating a VPC address or a plain EC2 address.
 
+        When using an Allocation ID, make sure to pass ``None`` for ``public_ip``
+        as EC2 expects a single parameter and if ``public_ip`` is passed boto
+        will preference that instead of ``allocation_id``.
+
         :type instance_id: string
         :param instance_id: The ID of the instance
 
@@ -1446,13 +1450,23 @@ class EC2Connection(AWSQueryConnection):
 
     def release_address(self, public_ip=None, allocation_id=None):
         """
-        Free up an Elastic IP address.
+        Free up an Elastic IP address.  Pass a public IP address to
+        release an EC2 Elastic IP address and an AllocationId to
+        release a VPC Elastic IP address.  You should only pass
+        one value.
+
+        This requires one of ``public_ip`` or ``allocation_id`` depending
+        on if you're associating a VPC address or a plain EC2 address.
+
+        When using an Allocation ID, make sure to pass ``None`` for ``public_ip``
+        as EC2 expects a single parameter and if ``public_ip`` is passed boto
+        will preference that instead of ``allocation_id``.
 
         :type public_ip: string
         :param public_ip: The public IP address for EC2 elastic IPs.
 
         :type allocation_id: string
-        :param allocation_id: The ID for VPC elastic IPs.
+        :param allocation_id: The Allocation ID for VPC elastic IPs.
 
         :rtype: bool
         :return: True if successful
@@ -2650,17 +2664,26 @@ class EC2Connection(AWSQueryConnection):
     # Reservation methods
     #
 
-    def get_all_reserved_instances_offerings(self, reserved_instances_id=None,
+    def get_all_reserved_instances_offerings(self,
+                                             reserved_instances_offering_ids=None,
                                              instance_type=None,
                                              availability_zone=None,
                                              product_description=None,
-                                             filters=None):
+                                             filters=None,
+                                             instance_tenancy=None,
+                                             offering_type=None,
+                                             include_marketplace=None,
+                                             min_duration=None,
+                                             max_duration=None,
+                                             max_instance_count=None,
+                                             next_token=None,
+                                             max_results=None):
         """
         Describes Reserved Instance offerings that are available for purchase.
 
-        :type reserved_instances_id: str
-        :param reserved_instances_id: Displays Reserved Instances with the
-                                      specified offering IDs.
+        :type reserved_instances_offering_ids: list
+        :param reserved_instances_id: One or more Reserved Instances
+            offering IDs.
 
         :type instance_type: str
         :param instance_type: Displays Reserved Instances of the specified
@@ -2684,12 +2707,49 @@ class EC2Connection(AWSQueryConnection):
                         being performed.  Check the EC2 API guide
                         for details.
 
+        :type instance_tenancy: string
+        :param instance_tenancy: The tenancy of the Reserved Instance offering.
+            A Reserved Instance with tenancy of dedicated will run on
+            single-tenant hardware and can only be launched within a VPC.
+
+        :type offering_type: string
+        :param offering_type: The Reserved Instance offering type.
+            Valid Values:
+                * Heavy Utilization
+                * Medium Utilization
+                * Light Utilization
+
+        :type include_marketplace: bool
+        :param include_marketplace: Include Marketplace offerings in the
+            response.
+
+        :type min_duration: int :param min_duration: Minimum duration (in
+            seconds) to filter when searching for offerings.
+
+        :type max_duration: int
+        :param max_duration: Maximum duration (in seconds) to filter when
+            searching for offerings.
+
+        :type max_instance_count: int
+        :param max_instance_count: Maximum number of instances to filter when
+            searching for offerings.
+
+        :type next_token: string
+        :param next_token: Token to use when requesting the next paginated set
+            of offerings.
+
+        :type max_results: int
+        :param max_results: Maximum number of offerings to return per call.
+
         :rtype: list
-        :return: A list of :class:`boto.ec2.reservedinstance.ReservedInstancesOffering`
+        :return: A list of
+            :class:`boto.ec2.reservedinstance.ReservedInstancesOffering`.
+
         """
         params = {}
-        if reserved_instances_id:
-            params['ReservedInstancesId'] = reserved_instances_id
+        if reserved_instances_offering_ids is not None:
+            self.build_list_params(params, reserved_instances_offering_ids,
+                                   'ReservedInstancesOfferingId')
         if instance_type:
             params['InstanceType'] = instance_type
         if availability_zone:
@@ -2698,6 +2758,25 @@ class EC2Connection(AWSQueryConnection):
             params['ProductDescription'] = product_description
         if filters:
             self.build_filter_params(params, filters)
+        if instance_tenancy is not None:
+            params['InstanceTenancy'] = instance_tenancy
+        if offering_type is not None:
+            params['OfferingType'] = offering_type
+        if include_marketplace is not None:
+            if include_marketplace:
+                params['IncludeMarketplace'] = 'true'
+            else:
+                params['IncludeMarketplace'] = 'false'
+        if min_duration is not None:
+            params['MinDuration'] = str(min_duration)
+        if max_duration is not None:
+            params['MaxDuration'] = str(max_duration)
+        if max_instance_count is not None:
+            params['MaxInstanceCount'] = str(max_instance_count)
+        if next_token is not None:
+            params['NextToken'] = next_token
+        if max_results is not None:
+            params['MaxResults'] = str(max_results)
 
         return self.get_list('DescribeReservedInstancesOfferings',
                              params, [('item', ReservedInstancesOffering)],
@@ -2737,7 +2816,7 @@ class EC2Connection(AWSQueryConnection):
 
     def purchase_reserved_instance_offering(self,
                                             reserved_instances_offering_id,
-                                            instance_count=1):
+                                            instance_count=1, limit_price=None):
         """
         Purchase a Reserved Instance for use with your account.
         ** CAUTION **
@@ -2752,14 +2831,106 @@ class EC2Connection(AWSQueryConnection):
         :param instance_count: The number of Reserved Instances to purchase.
                                Default value is 1.
 
+        :type limit_price: tuple
+        :param instance_count: Limit the price on the total order.
+                               Must be a tuple of (amount, currency_code), for example:
+                                   (100.0, 'USD').
+
         :rtype: :class:`boto.ec2.reservedinstance.ReservedInstance`
         :return: The newly created Reserved Instance
         """
         params = {
             'ReservedInstancesOfferingId': reserved_instances_offering_id,
             'InstanceCount': instance_count}
+        if limit_price is not None:
+            params['LimitPrice.Amount'] = str(limit_price[0])
+            params['LimitPrice.CurrencyCode'] = str(limit_price[1])
         return self.get_object('PurchaseReservedInstancesOffering', params,
                                ReservedInstance, verb='POST')
+
+    def create_reserved_instances_listing(self, reserved_instances_id, instance_count,
+                                          price_schedules, client_token):
+        """Creates a new listing for Reserved Instances.
+
+        Creates a new listing for Amazon EC2 Reserved Instances that will be
+        sold in the Reserved Instance Marketplace. You can submit one Reserved
+        Instance listing at a time.
+
+        The Reserved Instance Marketplace matches sellers who want to resell
+        Reserved Instance capacity that they no longer need with buyers who
+        want to purchase additional capacity. Reserved Instances bought and
+        sold through the Reserved Instance Marketplace work like any other
+        Reserved Instances.
+
+        If you want to sell your Reserved Instances, you must first register as
+        a Seller in the Reserved Instance Marketplace. After completing the
+        registration process, you can create a Reserved Instance Marketplace
+        listing of some or all of your Reserved Instances, and specify the
+        upfront price you want to receive for them. Your Reserved Instance
+        listings then become available for purchase.
+
+        :type reserved_instances_id: string
+        :param reserved_instances_id: The ID of the Reserved Instance that
+            will be listed.
+
+        :type instance_count: int
+        :param instance_count: The number of instances that are a part of a
+            Reserved Instance account that will be listed in the Reserved
+            Instance Marketplace. This number should be less than or equal to
+            the instance count associated with the Reserved Instance ID
+            specified in this call.
+
+        :type price_schedules: List of tuples
+        :param price_schedules: A list specifying the price of the Reserved
+            Instance for each month remaining in the Reserved Instance term.
+            Each tuple contains two elements, the price and the term.  For
+            example, for an instance that 11 months remaining in its term,
+            we can have a price schedule with an upfront price of $2.50.
+            At 8 months remaining we can drop the price down to $2.00.
+            This would be expressed as::
+
+                price_schedules=[('2.50', 11), ('2.00', 8)]
+
+        :type client_token: string
+        :param client_token: Unique, case-sensitive identifier you provide
+            to ensure idempotency of the request.  Maximum 64 ASCII characters.
+
+        :rtype: list
+        :return: A list of
+            :class:`boto.ec2.reservedinstance.ReservedInstanceListing`
+
+        """
+        params = {
+            'ReservedInstancesId': reserved_instances_id,
+            'InstanceCount': str(instance_count),
+            'ClientToken': client_token,
+        }
+        for i, schedule in enumerate(price_schedules):
+            price, term = schedule
+            params['PriceSchedules.%s.Price' % i] = str(price)
+            params['PriceSchedules.%s.Term' % i] = str(term)
+        return self.get_list('CreateReservedInstancesListing',
+                             params, [('item', ReservedInstanceListing)], verb='POST')
+
+    def cancel_reserved_instances_listing(
+            self, reserved_instances_listing_ids=None):
+        """Cancels the specified Reserved Instance listing.
+
+        :type reserved_instances_listing_ids: List of strings
+        :param reserved_instances_listing_ids: The ID of the
+            Reserved Instance listing to be cancelled.
+
+        :rtype: list
+        :return: A list of
+            :class:`boto.ec2.reservedinstance.ReservedInstanceListing`
+
+        """
+        params = {}
+        if reserved_instances_listing_ids is not None:
+            self.build_list_params(params, reserved_instances_listing_ids,
+                                   'ReservedInstancesListingId')
+        return self.get_list('CancelReservedInstancesListing',
+                             params, [('item', ReservedInstanceListing)], verb='POST')
 
     #
     # Monitoring
@@ -3143,18 +3314,18 @@ class EC2Connection(AWSQueryConnection):
                   'DeviceIndex': device_index}
         return self.get_status('AttachNetworkInterface', params, verb='POST')
 
-    def detach_network_interface(self, network_interface_id, force=False):
+    def detach_network_interface(self, attachement_id, force=False):
         """
         Detaches a network interface from an instance.
 
-        :type network_interface_id: str
-        :param network_interface_id: The ID of the network interface to detach.
+        :type attachment_id: str
+        :param attachment_id: The ID of the attachment.
 
         :type force: bool
         :param force: Set to true to force a detachment.
 
         """
-        params = {'NetworkInterfaceId': network_interface_id}
+        params = {'AttachmentId': network_interface_id}
         if force:
             params['Force'] = 'true'
         return self.get_status('DetachNetworkInterface', params, verb='POST')
