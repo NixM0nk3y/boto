@@ -29,7 +29,7 @@ from boto.rds.parametergroup import ParameterGroup
 from boto.rds.dbsnapshot import DBSnapshot
 from boto.rds.event import Event
 from boto.rds.regioninfo import RDSRegionInfo
-
+from boto.rds.tag import Tag
 
 def regions():
     """
@@ -81,7 +81,7 @@ class RDSConnection(AWSQueryConnection):
 
     DefaultRegionName = 'us-east-1'
     DefaultRegionEndpoint = 'rds.us-east-1.amazonaws.com'
-    APIVersion = '2011-04-01'
+    APIVersion = '2012-09-17'
 
     def __init__(self, aws_access_key_id=None, aws_secret_access_key=None,
                  is_secure=True, port=None, proxy=None, proxy_port=None,
@@ -1155,3 +1155,90 @@ class RDSConnection(AWSQueryConnection):
         if marker:
             params['Marker'] = marker
         return self.get_list('DescribeEvents', params, [('Event', Event)])
+
+    # Tag methods
+
+    def build_tag_param_list(self, params, tags):
+        keys = sorted(tags.keys())
+        i = 1
+        for key in keys:
+            value = tags[key]
+            params['Tags.member.%d.Key'%i] = key
+            if value is not None:
+                params['Tags.member.%d.Value'%i] = value
+            i += 1
+
+    def get_all_tags(self, resource_id ):
+        """
+        Retrieve all the metadata tags associated with your account.
+
+        :type resource_id: str
+        :param resource_id: The ARN of an RDS instance
+
+        :rtype: dict
+        :return: A dictionary containing metadata tags
+        """
+        params = {}
+        if resource_id:
+            params['ResourceName'] = resource_id
+
+        return self.get_list('ListTagsForResource', params,
+                             [('Tag', Tag)] )
+							 
+
+    def create_tags(self, resource_id, tags):
+        """
+        Create new metadata tags for the specified resource ids.
+
+        :type resource_id: str
+        :param resource_id: The ARN of an RDS instance
+
+        :type tags: dict
+        :param tags: A dictionary containing the name/value pairs.
+                     If you want to create only a tag name, the
+                     value for that tag should be the empty string
+                     (e.g. '').
+
+        """
+        params = {}
+
+        if resource_id:
+            params['ResourceName'] = resource_id
+
+        for i,tag in enumerate(tags):
+
+            if not isinstance(tag, Tag):
+                tag = Tag(key=tag , value=tags[tag])
+
+            tag.build_params(params, i + 1)
+
+        return self.get_status('AddTagsToResource', params, verb='POST')
+
+    def delete_tags(self, resource_id, tags):
+        """
+        Delete metadata tags for the specified resource ids.
+
+        :type resource_id: str
+        :param resource_id: The ARN of an RDS instance
+
+        :type tags: dict
+        :param tags: A dictionary containing the name/value pairs.
+                     If you want to create only a tag name, the
+                     value for that tag should be the empty string
+                     (e.g. '').
+
+        """
+
+        params = {}
+
+        if resource_id:
+            params['ResourceName'] = resource_id
+
+        for i,tag in enumerate(tags):
+
+            if not isinstance(tag, Tag):
+                tag = Tag(key=tag , value=tags[tag])
+
+            tag.build_keyparams(params, i + 1)
+
+        return self.get_status('RemoveTagsFromResource', params, verb='POST')
