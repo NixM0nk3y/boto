@@ -50,9 +50,9 @@ def regions():
             RegionInfo(name='ap-southeast-1',
                        endpoint='elasticache.ap-southeast-1.amazonaws.com',
                        connection_cls=ElastiCacheConnection),
-            RegionInfo(name='ap-southeast-2',
-                       endpoint='elasticache.ap-southeast-2.amazonaws.com',
-                       connection_cls=ElastiCacheConnection),
+#            RegionInfo(name='ap-southeast-2',
+#                       endpoint='elasticache.ap-southeast-2.amazonaws.com',
+#                       connection_cls=ElastiCacheConnection),
             ]
 
 def connect_to_region(region_name, **kw_params):
