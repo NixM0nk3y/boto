@@ -148,17 +148,20 @@ class Location:
 
 class S3Connection(AWSAuthConnection):
 
-    DefaultHost = 's3.amazonaws.com'
+    DefaultHost = boto.config.get('s3', 'host', 's3.amazonaws.com')
+    DefaultCallingFormat = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat')
     QueryString = 'Signature=%s&Expires=%d&AWSAccessKeyId=%s'
 
     def __init__(self, aws_access_key_id=None, aws_secret_access_key=None,
                  is_secure=True, port=None, proxy=None, proxy_port=None,
                  proxy_user=None, proxy_pass=None,
                  host=DefaultHost, debug=0, https_connection_factory=None,
-                 calling_format=SubdomainCallingFormat(), path='/',
+                 calling_format=DefaultCallingFormat, path='/',
                  provider='aws', bucket_class=Bucket, security_token=None,
                  suppress_consec_slashes=True, anon=False,
                  validate_certs=None):
+        if isinstance(calling_format, str):
+            calling_format=boto.utils.find_class(calling_format)()
         self.calling_format = calling_format
         self.bucket_class = bucket_class
         self.anon = anon
@@ -404,12 +407,49 @@ class S3Connection(AWSAuthConnection):
         return rs.owner.id
 
     def get_bucket(self, bucket_name, validate=True, headers=None):
+        """
+        Retrieves a bucket by name.
+
+        If the bucket does not exist, an ``S3ResponseError`` will be raised. If
+        you are unsure if the bucket exists or not, you can use the
+        ``S3Connection.lookup`` method, which will either return a valid bucket
+        or ``None``.
+
+        :type bucket_name: string
+        :param bucket_name: The name of the bucket
+
+        :type headers: dict
+        :param headers: Additional headers to pass along with the request to
+            AWS.
+
+        :type validate: boolean
+        :param validate: If ``True``, it will try to fetch all keys within the
+            given bucket. (Default: ``True``)
+        """
         bucket = self.bucket_class(self, bucket_name)
         if validate:
             bucket.get_all_keys(headers, maxkeys=0)
         return bucket
 
     def lookup(self, bucket_name, validate=True, headers=None):
+        """
+        Attempts to get a bucket from S3.
+
+        Works identically to ``S3Connection.get_bucket``, save for that it
+        will return ``None`` if the bucket does not exist instead of throwing
+        an exception.
+
+        :type bucket_name: string
+        :param bucket_name: The name of the bucket
+
+        :type headers: dict
+        :param headers: Additional headers to pass along with the request to
+            AWS.
+
+        :type validate: boolean
+        :param validate: If ``True``, it will try to fetch all keys within the
+            given bucket. (Default: ``True``)
+        """
         try:
             bucket = self.get_bucket(bucket_name, validate, headers=headers)
         except:
@@ -420,7 +460,8 @@ class S3Connection(AWSAuthConnection):
                       location=Location.DEFAULT, policy=None):
         """
         Creates a new located bucket. By default it's in the USA. You can pass
-        Location.EU to create an European bucket.
+        Location.EU to create a European bucket (S3) or European Union bucket
+        (GCS).
 
         :type bucket_name: string
         :param bucket_name: The name of the new bucket
@@ -428,8 +469,10 @@ class S3Connection(AWSAuthConnection):
         :type headers: dict
         :param headers: Additional headers to pass along with the request to AWS.
 
-        :type location: :class:`boto.s3.connection.Location`
-        :param location: The location of the new bucket
+        :type location: str
+        :param location: The location of the new bucket.  You can use one of the
+            constants in :class:`boto.s3.connection.Location` (e.g. Location.EU,
+            Location.USWest, etc.).
 
         :type policy: :class:`boto.s3.acl.CannedACLStrings`
         :param policy: A canned ACL policy that will be applied to the
@@ -461,6 +504,19 @@ class S3Connection(AWSAuthConnection):
                 response.status, response.reason, body)
 
     def delete_bucket(self, bucket, headers=None):
+        """
+        Removes an S3 bucket.
+
+        In order to remove the bucket, it must first be empty. If the bucket is
+        not empty, an ``S3ResponseError`` will be raised.
+
+        :type bucket_name: string
+        :param bucket_name: The name of the bucket
+
+        :type headers: dict
+        :param headers: Additional headers to pass along with the request to
+            AWS.
+        """
         response = self.make_request('DELETE', bucket, headers=headers)
         body = response.read()
         if response.status != 204:
@@ -468,7 +524,8 @@ class S3Connection(AWSAuthConnection):
                 response.status, response.reason, body)
 
     def make_request(self, method, bucket='', key='', headers=None, data='',
-            query_args=None, sender=None, override_num_retries=None):
+                     query_args=None, sender=None, override_num_retries=None,
+                     retry_handler=None):
         if isinstance(bucket, self.bucket_class):
             bucket = bucket.name
         if isinstance(key, Key):
@@ -483,6 +540,9 @@ class S3Connection(AWSAuthConnection):
             boto.log.debug('path=%s' % path)
             auth_path += '?' + query_args
             boto.log.debug('auth_path=%s' % auth_path)
-        return AWSAuthConnection.make_request(self, method, path, headers,
-                data, host, auth_path, sender,
-                override_num_retries=override_num_retries)
+        return AWSAuthConnection.make_request(
+            self, method, path, headers,
+            data, host, auth_path, sender,
+            override_num_retries=override_num_retries,
+            retry_handler=retry_handler
+        )

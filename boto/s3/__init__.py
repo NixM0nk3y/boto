@@ -53,6 +53,9 @@ def regions():
     return [S3RegionInfo(name='us-east-1',
                          endpoint='s3.amazonaws.com',
                          connection_cls=S3Connection),
+            S3RegionInfo(name='us-gov-west-1',
+                         endpoint='s3-us-gov-west-1.amazonaws.com',
+                       connection_cls=S3Connection),
             S3RegionInfo(name='us-west-1',
                          endpoint='s3-us-west-1.amazonaws.com',
                        connection_cls=S3Connection),
@@ -70,6 +73,9 @@ def regions():
                          connection_cls=S3Connection),
             S3RegionInfo(name='eu-west-1',
                          endpoint='s3-eu-west-1.amazonaws.com',
+                         connection_cls=S3Connection),
+            S3RegionInfo(name='sa-east-1',
+                         endpoint='s3-sa-east-1.amazonaws.com',
                          connection_cls=S3Connection),
             ]
 

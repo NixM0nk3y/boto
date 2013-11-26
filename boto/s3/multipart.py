@@ -235,6 +235,9 @@ class MultiPartUpload(object):
 
         The other parameters are exactly as defined for the
         :class:`boto.s3.key.Key` set_contents_from_file method.
+
+        :rtype: :class:`boto.s3.key.Key` or subclass
+        :returns: The uploaded part containing the etag.
         """
         if part_num < 1:
             raise ValueError('Part numbers must be greater than zero')
@@ -244,9 +247,11 @@ class MultiPartUpload(object):
                                    cb=cb, num_cb=num_cb, md5=md5,
                                    reduced_redundancy=False,
                                    query_args=query_args, size=size)
+        return key
 
     def copy_part_from_key(self, src_bucket_name, src_key_name, part_num,
-                           start=None, end=None, src_version_id=None):
+                           start=None, end=None, src_version_id=None,
+                           headers=None):
         """
         Copy another part of this MultiPart Upload.
 
@@ -267,6 +272,9 @@ class MultiPartUpload(object):
 
         :type src_version_id: string
         :param src_version_id: version_id of source object to copy from
+
+        :type headers: dict
+        :param headers: Any headers to pass along in the request
         """
         if part_num < 1:
             raise ValueError('Part numbers must be greater than zero')
@@ -274,9 +282,11 @@ class MultiPartUpload(object):
         if start is not None and end is not None:
             rng = 'bytes=%s-%s' % (start, end)
             provider = self.bucket.connection.provider
-            headers = {provider.copy_source_range_header: rng}
-        else:
-            headers = None
+            if headers is None:
+                headers = {}
+            else:
+                headers = headers.copy()
+            headers[provider.copy_source_range_header] = rng
         return self.bucket.copy_key(self.key_name, src_bucket_name,
                                     src_key_name,
                                     src_version_id=src_version_id,

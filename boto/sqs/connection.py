@@ -100,12 +100,8 @@ class SQSConnection(AWSQueryConnection):
         :param queue: The SQS queue to be deleted
 
         :type force_deletion: Boolean
-        :param force_deletion: Normally, SQS will not delete a queue
-            that contains messages.  However, if the force_deletion
-            argument is True, the queue will be deleted regardless of
-            whether there are messages in the queue or not.  USE WITH
-            CAUTION.  This will delete all messages in the queue as
-            well.
+        :param force_deletion: A deprecated parameter that is no longer used by
+            SQS's API.
 
         :rtype: bool
         :return: True if the command succeeded, False otherwise
@@ -290,8 +286,8 @@ class SQSConnection(AWSQueryConnection):
         :param queue: The Queue from which messages are read.
 
         :type receipt_handle: str
-        :param queue: The receipt handle associated with the message whose
-                      visibility timeout will be changed.
+        :param receipt_handle: The receipt handle associated with the message
+                               whose visibility timeout will be changed.
 
         :type visibility_timeout: int
         :param visibility_timeout: The new value of the message's visibility
@@ -341,16 +337,19 @@ class SQSConnection(AWSQueryConnection):
             params['QueueNamePrefix'] = prefix
         return self.get_list('ListQueues', params, [('QueueUrl', Queue)])
 
-    def get_queue(self, queue_name):
+    def get_queue(self, queue_name, owner_acct_id=None):
         """
         Retrieves the queue with the given name, or ``None`` if no match
         was found.
 
         :param str queue_name: The name of the queue to retrieve.
+        :param str owner_acct_id: Optionally, the AWS account ID of the account that created the queue.
         :rtype: :py:class:`boto.sqs.queue.Queue` or ``None``
         :returns: The requested queue, or ``None`` if no match was found.
         """
         params = {'QueueName': queue_name}
+        if owner_acct_id:
+            params['QueueOwnerAWSAccountId']=owner_acct_id
         try:
             return self.get_object('GetQueueUrl', params, Queue)
         except SQSError:

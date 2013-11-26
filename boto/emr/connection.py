@@ -28,9 +28,12 @@ import types
 import boto
 import boto.utils
 from boto.ec2.regioninfo import RegionInfo
-from boto.emr.emrobject import JobFlow, RunJobFlowResponse
-from boto.emr.emrobject import AddInstanceGroupsResponse
-from boto.emr.emrobject import ModifyInstanceGroupsResponse
+from boto.emr.emrobject import AddInstanceGroupsResponse, BootstrapActionList, \
+                               Cluster, ClusterSummaryList, HadoopStep, \
+                               InstanceGroupList, InstanceList, JobFlow, \
+                               JobFlowStepList, \
+                               ModifyInstanceGroupsResponse, \
+                               RunJobFlowResponse, StepSummaryList
 from boto.emr.step import JarStep
 from boto.connection import AWSQueryConnection
 from boto.exception import EmrResponseError
@@ -65,9 +68,29 @@ class EmrConnection(AWSQueryConnection):
                                     https_connection_factory, path,
                                     security_token,
                                     validate_certs=validate_certs)
+        # Many of the EMR hostnames are of the form:
+        #     <region>.<service_name>.amazonaws.com
+        # rather than the more common:
+        #     <service_name>.<region>.amazonaws.com
+        # so we need to explicitly set the region_name and service_name
+        # for the SigV4 signing.
+        self.auth_region_name = self.region.name
+        self.auth_service_name = 'elasticmapreduce'
 
     def _required_auth_capability(self):
-        return ['emr']
+        return ['hmac-v4']
+
+    def describe_cluster(self, cluster_id):
+        """
+        Describes an Elastic MapReduce cluster
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        """
+        params = {
+            'ClusterId': cluster_id
+        }
+        return self.get_object('DescribeCluster', params, Cluster)
 
     def describe_jobflow(self, jobflow_id):
         """
@@ -111,6 +134,139 @@ class EmrConnection(AWSQueryConnection):
 
         return self.get_list('DescribeJobFlows', params, [('member', JobFlow)])
 
+    def describe_step(self, cluster_id, step_id):
+        """
+        Describe an Elastic MapReduce step
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        :type step_id: str
+        :param step_id: The step id of interest
+        """
+        params = {
+            'ClusterId': cluster_id,
+            'StepId': step_id
+        }
+
+        return self.get_object('DescribeStep', params, HadoopStep)
+
+    def list_bootstrap_actions(self, cluster_id, marker=None):
+        """
+        Get a list of bootstrap actions for an Elastic MapReduce cluster
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        :type marker: str
+        :param marker: Pagination marker
+        """
+        params = {
+            'ClusterId': cluster_id
+        }
+
+        if marker:
+            params['Marker'] = marker
+
+        return self.get_object('ListBootstrapActions', params, BootstrapActionList)
+
+    def list_clusters(self, created_after=None, created_before=None,
+                      cluster_states=None, marker=None):
+        """
+        List Elastic MapReduce clusters with optional filtering
+
+        :type created_after: datetime
+        :param created_after: Bound on cluster creation time
+        :type created_before: datetime
+        :param created_before: Bound on cluster creation time
+        :type cluster_states: list
+        :param cluster_states: Bound on cluster states
+        :type marker: str
+        :param marker: Pagination marker
+        """
+        params = {}
+        if created_after:
+            params['CreatedAfter'] = created_after.strftime(
+                boto.utils.ISO8601)
+        if created_before:
+            params['CreatedBefore'] = created_before.strftime(
+                boto.utils.ISO8601)
+        if marker:
+            params['Marker'] = marker
+
+        if cluster_states:
+            self.build_list_params(params, cluster_states, 'ClusterStates.member')
+
+        return self.get_object('ListClusters', params, ClusterSummaryList)
+
+    def list_instance_groups(self, cluster_id, marker=None):
+        """
+        List EC2 instance groups in a cluster
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        :type marker: str
+        :param marker: Pagination marker
+        """
+        params = {
+            'ClusterId': cluster_id
+        }
+
+        if marker:
+            params['Marker'] = marker
+
+        return self.get_object('ListInstanceGroups', params, InstanceGroupList)
+
+    def list_instances(self, cluster_id, instance_group_id=None,
+                       instance_group_types=None, marker=None):
+        """
+        List EC2 instances in a cluster
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        :type instance_group_id: str
+        :param instance_group_id: The EC2 instance group id of interest
+        :type instance_group_types: list
+        :param instance_group_types: Filter by EC2 instance group type
+        :type marker: str
+        :param marker: Pagination marker
+        """
+        params = {
+            'ClusterId': cluster_id
+        }
+
+        if instance_group_id:
+            params['InstanceGroupId'] = instance_group_id
+        if marker:
+            params['Marker'] = marker
+
+        if instance_group_types:
+            self.build_list_params(params, instance_group_types,
+                                   'InstanceGroupTypeList.member')
+
+        return self.get_object('ListInstances', params, InstanceList)
+
+    def list_steps(self, cluster_id, step_states=None, marker=None):
+        """
+        List cluster steps
+
+        :type cluster_id: str
+        :param cluster_id: The cluster id of interest
+        :type step_states: list
+        :param step_states: Filter by step states
+        :type marker: str
+        :param marker: Pagination marker
+        """
+        params = {
+            'ClusterId': cluster_id
+        }
+
+        if marker:
+            params['Marker'] = marker
+
+        if step_states:
+            self.build_list_params(params, step_states, 'StepStateList.member')
+
+        self.get_object('ListSteps', params, StepSummaryList)
+
     def terminate_jobflow(self, jobflow_id):
         """
         Terminate an Elastic MapReduce job flow
@@ -150,7 +306,7 @@ class EmrConnection(AWSQueryConnection):
         params.update(self._build_step_list(step_args))
 
         return self.get_object(
-            'AddJobFlowSteps', params, RunJobFlowResponse, verb='POST')
+            'AddJobFlowSteps', params, JobFlowStepList, verb='POST')
 
     def add_instance_groups(self, jobflow_id, instance_groups):
         """
@@ -214,7 +370,9 @@ class EmrConnection(AWSQueryConnection):
                     instance_groups=None,
                     additional_info=None,
                     ami_version=None,
-                    api_params=None):
+                    api_params=None,
+                    visible_to_all_users=None,
+                    job_flow_role=None):
         """
         Runs a job flow
         :type name: str
@@ -251,7 +409,7 @@ class EmrConnection(AWSQueryConnection):
 
         :type hadoop_version: str
         :param hadoop_version: Version of Hadoop to use. This no longer
-        defaults to '0.20' and now uses the AMI default.
+            defaults to '0.20' and now uses the AMI default.
 
         :type steps: list(boto.emr.Step)
         :param steps: List of steps to add with the job
@@ -280,6 +438,21 @@ class EmrConnection(AWSQueryConnection):
             directly to the EMR API (so you don't have to upgrade boto to
             use new EMR features). You can also delete an API parameter
             by setting it to None.
+
+        :type visible_to_all_users: bool
+        :param visible_to_all_users: Whether the job flow is visible to all IAM
+            users of the AWS account associated with the job flow. If this
+            value is set to ``True``, all IAM users of that AWS
+            account can view and (if they have the proper policy permissions
+            set) manage the job flow. If it is set to ``False``, only
+            the IAM user that created the job flow can view and manage
+            it.
+
+        :type job_flow_role: str
+        :param job_flow_role: An IAM role for the job flow. The EC2
+            instances of the job flow assume this role. The default role is
+            ``EMRJobflowDefault``. In order to use the default role,
+            you must have already created it using the CLI.
 
         :rtype: str
         :return: The jobflow id
@@ -349,6 +522,15 @@ class EmrConnection(AWSQueryConnection):
                 else:
                     params[key] = value
 
+        if visible_to_all_users is not None:
+            if visible_to_all_users:
+                params['VisibleToAllUsers'] = 'true'
+            else:
+                params['VisibleToAllUsers'] = 'false'
+
+        if job_flow_role is not None:
+            params['JobFlowRole'] = job_flow_role
+
         response = self.get_object(
             'RunJobFlow', params, RunJobFlowResponse, verb='POST')
         return response.jobflowid
@@ -371,6 +553,24 @@ class EmrConnection(AWSQueryConnection):
         self.build_list_params(params, [jobflow_id], 'JobFlowIds.member')
 
         return self.get_status('SetTerminationProtection', params, verb='POST')
+
+    def set_visible_to_all_users(self, jobflow_id, visibility):
+        """
+        Set whether specified Elastic Map Reduce job flows are visible to all IAM users
+
+        :type jobflow_ids: list or str
+        :param jobflow_ids: A list of job flow IDs
+
+        :type visibility: bool
+        :param visibility: Visibility
+        """
+        assert visibility in (True, False)
+
+        params = {}
+        params['VisibleToAllUsers'] = (visibility and "true") or "false"
+        self.build_list_params(params, [jobflow_id], 'JobFlowIds.member')
+
+        return self.get_status('SetVisibleToAllUsers', params, verb='POST')
 
     def _build_bootstrap_action_args(self, bootstrap_action):
         bootstrap_action_params = {}

@@ -40,6 +40,7 @@ from boto.s3.lifecycle import Lifecycle
 from boto.s3.tagging import Tags
 from boto.s3.cors import CORSConfiguration
 from boto.s3.bucketlogging import BucketLogging
+from boto.s3 import website
 import boto.jsonresponse
 import boto.utils
 import xml.sax
@@ -62,6 +63,7 @@ class S3WebsiteEndpointTranslate:
     trans_region['sa-east-1'] = 's3-website-sa-east-1'
     trans_region['ap-northeast-1'] = 's3-website-ap-northeast-1'
     trans_region['ap-southeast-1'] = 's3-website-ap-southeast-1'
+    trans_region['ap-southeast-2'] = 's3-website-ap-southeast-2'
 
     @classmethod
     def translate_region(self, reg):
@@ -84,14 +86,6 @@ class Bucket(object):
          <Status>%s</Status>
          <MfaDelete>%s</MfaDelete>
        </VersioningConfiguration>"""
-
-    WebsiteBody = """<?xml version="1.0" encoding="UTF-8"?>
-      <WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-        <IndexDocument><Suffix>%s</Suffix></IndexDocument>
-        %s
-      </WebsiteConfiguration>"""
-
-    WebsiteErrorFragment = """<ErrorDocument><Key>%s</Key></ErrorDocument>"""
 
     VersionRE = '<Status>([A-Za-z]+)</Status>'
     MFADeleteRE = '<MfaDelete>([A-Za-z]+)</MfaDelete>'
@@ -208,6 +202,7 @@ class Bucket(object):
             k.handle_version_headers(response)
             k.handle_encryption_headers(response)
             k.handle_restore_headers(response)
+            k.handle_addl_headers(response.getheaders())
             return k, response
         else:
             if response.status == 404:
@@ -273,8 +268,10 @@ class Bucket(object):
         :param delimiter: can be used in conjunction with the prefix
             to allow you to organize and browse your keys
             hierarchically. See:
-            http://docs.amazonwebservices.com/AmazonS3/2006-03-01/ for
-            more details.
+
+            http://aws.amazon.com/releasenotes/Amazon-S3/213
+
+            for more details.
 
         :type marker: string
         :param marker: The "marker" of where you are in the result set
@@ -305,24 +302,35 @@ class Bucket(object):
                                             upload_id_marker,
                                             headers)
 
+    def _get_all_query_args(self, params, initial_query_string=''):
+        pairs = []
+
+        if initial_query_string:
+            pairs.append(initial_query_string)
+
+        for key, value in params.items():
+            key = key.replace('_', '-')
+            if key == 'maxkeys':
+                key = 'max-keys'
+            if isinstance(value, unicode):
+                value = value.encode('utf-8')
+            if value is not None and value != '':
+                pairs.append('%s=%s' % (
+                    urllib.quote(key),
+                    urllib.quote(str(value)
+                )))
+
+        return '&'.join(pairs)
+
     def _get_all(self, element_map, initial_query_string='',
                  headers=None, **params):
-        l = []
-        for k, v in params.items():
-            k = k.replace('_', '-')
-            if  k == 'maxkeys':
-                k = 'max-keys'
-            if isinstance(v, unicode):
-                v = v.encode('utf-8')
-            if v is not None and v != '':
-                l.append('%s=%s' % (urllib.quote(k), urllib.quote(str(v))))
-        if len(l):
-            s = initial_query_string + '&' + '&'.join(l)
-        else:
-            s = initial_query_string
+        query_args = self._get_all_query_args(
+            params,
+            initial_query_string=initial_query_string
+        )
         response = self.connection.make_request('GET', self.name,
                                                 headers=headers,
-                                                query_args=s)
+                                                query_args=query_args)
         body = response.read()
         boto.log.debug(body)
         if response.status == 200:
@@ -333,6 +341,20 @@ class Bucket(object):
         else:
             raise self.connection.provider.storage_response_error(
                 response.status, response.reason, body)
+
+    def validate_kwarg_names(self, kwargs, names):
+        """
+        Checks that all named arguments are in the specified list of names.
+
+        :type kwargs: dict
+        :param kwargs: Dictionary of kwargs to validate.
+
+        :type names: list
+        :param names: List of possible named arguments.
+        """
+        for kwarg in kwargs:
+            if kwarg not in names:
+                raise TypeError('Invalid argument "%s"!' % kwarg)
 
     def get_all_keys(self, headers=None, **params):
         """
@@ -363,6 +385,8 @@ class Bucket(object):
         :return: The result from S3 listing the keys requested
 
         """
+        self.validate_kwarg_names(params, ['maxkeys', 'max_keys', 'prefix',
+                                           'marker', 'delimiter'])
         return self._get_all([('Contents', self.key_class),
                               ('CommonPrefixes', Prefix)],
                              '', headers, **params)
@@ -400,10 +424,23 @@ class Bucket(object):
         :rtype: ResultSet
         :return: The result from S3 listing the keys requested
         """
+        self.validate_get_all_versions_params(params)
         return self._get_all([('Version', self.key_class),
                               ('CommonPrefixes', Prefix),
                               ('DeleteMarker', DeleteMarker)],
                              'versions', headers, **params)
+
+    def validate_get_all_versions_params(self, params):
+        """
+        Validate that the parameters passed to get_all_versions are valid.
+        Overridden by subclasses that allow a different set of parameters.
+
+        :type params: dict
+        :param params: Parameters to validate.
+        """
+        self.validate_kwarg_names(
+                params, ['maxkeys', 'max_keys', 'prefix', 'key_marker',
+                         'version_id_marker', 'delimiter'])
 
     def get_all_multipart_uploads(self, headers=None, **params):
         """
@@ -443,6 +480,8 @@ class Bucket(object):
         :return: The result from S3 listing the uploads requested
 
         """
+        self.validate_kwarg_names(params, ['max_uploads', 'key_marker',
+                                           'upload_id_marker'])
         return self._get_all([('Upload', MultiPartUpload),
                               ('CommonPrefixes', Prefix)],
                              'uploads', headers, **params)
@@ -589,6 +628,8 @@ class Bucket(object):
             created or removed and what version_id the delete created
             or removed.
         """
+        if not key_name:
+            raise ValueError('Empty key names are not allowed')
         return self._delete_key_internal(key_name, headers=headers,
                                          version_id=version_id,
                                          mfa_token=mfa_token,
@@ -617,6 +658,7 @@ class Bucket(object):
             k = self.key_class(self)
             k.name = key_name
             k.handle_version_headers(response)
+            k.handle_addl_headers(response.getheaders())
             return k
 
     def copy_key(self, new_key_name, src_bucket_name,
@@ -683,7 +725,8 @@ class Bucket(object):
             if self.name == src_bucket_name:
                 src_bucket = self
             else:
-                src_bucket = self.connection.get_bucket(src_bucket_name)
+                src_bucket = self.connection.get_bucket(
+                    src_bucket_name, validate=False)
             acl = src_bucket.get_xml_acl(src_key_name)
         if encrypt_key:
             headers[provider.server_side_encryption_header] = 'AES256'
@@ -710,6 +753,7 @@ class Bucket(object):
             if hasattr(key, 'Error'):
                 raise provider.storage_copy_error(key.Code, key.Message, body)
             key.handle_version_headers(response)
+            key.handle_addl_headers(response.getheaders())
             if preserve_acl:
                 self.set_xml_acl(acl, new_key_name)
             return key
@@ -1160,7 +1204,9 @@ class Bucket(object):
         :param lifecycle_config: The lifecycle configuration you want
             to configure for this bucket.
         """
-        fp = StringIO.StringIO(lifecycle_config.to_xml())
+        xml = lifecycle_config.to_xml()
+        xml = xml.encode('utf-8')
+        fp = StringIO.StringIO(xml)
         md5 = boto.utils.compute_md5(fp)
         if headers is None:
             headers = {}
@@ -1213,7 +1259,10 @@ class Bucket(object):
             raise self.connection.provider.storage_response_error(
                 response.status, response.reason, body)
 
-    def configure_website(self, suffix, error_key='', headers=None):
+    def configure_website(self, suffix=None, error_key=None,
+                          redirect_all_requests_to=None,
+                          routing_rules=None,
+                          headers=None):
         """
         Configure this bucket to act as a website
 
@@ -1229,13 +1278,35 @@ class Bucket(object):
         :param error_key: The object key name to use when a 4XX class
             error occurs.  This is optional.
 
+        :type redirect_all_requests_to: :class:`boto.s3.website.RedirectLocation`
+        :param redirect_all_requests_to: Describes the redirect behavior for
+            every request to this bucket's website endpoint. If this value is
+            non None, no other values are considered when configuring the
+            website configuration for the bucket. This is an instance of
+            ``RedirectLocation``.
+
+        :type routing_rules: :class:`boto.s3.website.RoutingRules`
+        :param routing_rules: Object which specifies conditions
+            and redirects that apply when the conditions are met.
+
         """
-        if error_key:
-            error_frag = self.WebsiteErrorFragment % error_key
-        else:
-            error_frag = ''
-        body = self.WebsiteBody % (suffix, error_frag)
-        response = self.connection.make_request('PUT', self.name, data=body,
+        config = website.WebsiteConfiguration(
+                suffix, error_key, redirect_all_requests_to,
+                routing_rules)
+        return self.set_website_configuration(config, headers=headers)
+
+    def set_website_configuration(self, config, headers=None):
+        """
+        :type config: boto.s3.website.WebsiteConfiguration
+        :param config: Configuration data
+        """
+        return self.set_website_configuration_xml(config.to_xml(),
+          headers=headers)
+
+
+    def set_website_configuration_xml(self, xml, headers=None):
+        """Upload xml website configuration"""
+        response = self.connection.make_request('PUT', self.name, data=xml,
                                                 query_args='website',
                                                 headers=headers)
         body = response.read()
@@ -1262,8 +1333,19 @@ class Bucket(object):
             * ErrorDocument
 
               * Key : name of object to serve when an error occurs
+
         """
         return self.get_website_configuration_with_xml(headers)[0]
+
+    def get_website_configuration_obj(self, headers=None):
+        """Get the website configuration as a
+        :class:`boto.s3.website.WebsiteConfiguration` object.
+        """
+        config_xml = self.get_website_configuration_xml(headers=headers)
+        config = website.WebsiteConfiguration()
+        h = handler.XmlHandler(config, self)
+        xml.sax.parseString(config_xml, h)
+        return config
 
     def get_website_configuration_with_xml(self, headers=None):
         """
@@ -1272,16 +1354,34 @@ class Bucket(object):
 
         :rtype: 2-Tuple
         :returns: 2-tuple containing:
-        1) A dictionary containing a Python representation
-                  of the XML response from GCS. The overall structure is:
-          * WebsiteConfiguration
-            * IndexDocument
-              * Suffix : suffix that is appended to request that
-                is for a "directory" on the website endpoint
-              * ErrorDocument
-                * Key : name of object to serve when an error occurs
-        2) unparsed XML describing the bucket's website configuration.
+
+            1) A dictionary containing a Python representation \
+                of the XML response. The overall structure is:
+
+              * WebsiteConfiguration
+
+                * IndexDocument
+
+                  * Suffix : suffix that is appended to request that \
+                    is for a "directory" on the website endpoint
+
+                  * ErrorDocument
+
+                    * Key : name of object to serve when an error occurs
+
+
+            2) unparsed XML describing the bucket's website configuration
+
         """
+
+        body = self.get_website_configuration_xml(headers=headers)
+        e = boto.jsonresponse.Element()
+        h = boto.jsonresponse.XmlHandler(e, None)
+        h.parse(body)
+        return e, body
+
+    def get_website_configuration_xml(self, headers=None):
+        """Get raw website configuration xml"""
         response = self.connection.make_request('GET', self.name,
                 query_args='website', headers=headers)
         body = response.read()
@@ -1290,11 +1390,7 @@ class Bucket(object):
         if response.status != 200:
             raise self.connection.provider.storage_response_error(
                 response.status, response.reason, body)
-
-        e = boto.jsonresponse.Element()
-        h = boto.jsonresponse.XmlHandler(e, None)
-        h.parse(body)
-        return e, body
+        return body
 
     def delete_website_configuration(self, headers=None):
         """
