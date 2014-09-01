@@ -142,7 +142,7 @@ class RedshiftConnection(AWSQueryConnection):
                                 self.DefaultRegionEndpoint)
         if 'host' not in kwargs:
             kwargs['host'] = region.endpoint
-        AWSQueryConnection.__init__(self, **kwargs)
+        super(RedshiftConnection, self).__init__(**kwargs)
         self.region = region
 
     def _required_auth_capability(self):
@@ -2930,7 +2930,7 @@ class RedshiftConnection(AWSQueryConnection):
         params['ContentType'] = 'JSON'
         response = self.make_request(action=action, verb='POST',
                                      path='/', params=params)
-        body = response.read()
+        body = response.read().decode('utf-8')
         boto.log.debug(body)
         if response.status == 200:
             return json.loads(body)

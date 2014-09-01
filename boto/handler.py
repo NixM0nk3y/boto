@@ -19,8 +19,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-import StringIO
 import xml.sax
+
+from boto.compat import StringIO
 
 class XmlHandler(xml.sax.ContentHandler):
 
@@ -32,7 +33,7 @@ class XmlHandler(xml.sax.ContentHandler):
     def startElement(self, name, attrs):
         self.current_text = ''
         new_node = self.nodes[-1][1].startElement(name, attrs, self.connection)
-        if new_node != None:
+        if new_node is not None:
             self.nodes.append((name, new_node))
 
     def endElement(self, name):
@@ -55,4 +56,4 @@ class XmlHandlerWrapper(object):
         self.parser.setFeature(xml.sax.handler.feature_external_ges, 0)
 
     def parseString(self, content):
-        return self.parser.parse(StringIO.StringIO(content))
+        return self.parser.parse(StringIO(content))

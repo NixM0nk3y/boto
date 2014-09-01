@@ -30,7 +30,7 @@ from boto.exception import BotoClientError
 class KeyPair(EC2Object):
 
     def __init__(self, connection=None):
-        EC2Object.__init__(self, connection)
+        super(KeyPair, self).__init__(connection)
         self.name = None
         self.fingerprint = None
         self.material = None
@@ -83,7 +83,7 @@ class KeyPair(EC2Object):
             fp = open(file_path, 'wb')
             fp.write(self.material)
             fp.close()
-            os.chmod(file_path, 0600)
+            os.chmod(file_path, 0o600)
             return True
         else:
             raise BotoClientError('KeyPair contains no material')

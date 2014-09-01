@@ -19,6 +19,9 @@ class Item(object):
     This object presents a dictionary-like interface for accessing/storing
     data. It also tries to intelligently track how data has changed throughout
     the life of the instance, to be as efficient as possible about updates.
+
+    Empty items, or items that have no data, are considered falsey.
+
     """
     def __init__(self, table, data=None, loaded=False):
         """
@@ -104,6 +107,11 @@ class Item(object):
 
     def __contains__(self, key):
         return key in self._data
+
+    def __bool__(self):
+        return bool(self._data)
+
+    __nonzero__ = __bool__
 
     def _determine_alterations(self):
         """
@@ -250,7 +258,7 @@ class Item(object):
         expects = {}
 
         if fields is None:
-            fields = self._data.keys() + self._orig_data.keys()
+            fields = list(self._data.keys()) + list(self._orig_data.keys())
 
         # Only uniques.
         fields = set(fields)

@@ -53,7 +53,7 @@ class TaggedEC2Object(EC2Object):
     """
 
     def __init__(self, connection=None):
-        EC2Object.__init__(self, connection)
+        super(TaggedEC2Object, self).__init__(connection)
         self.tags = TagSet()
 
     def startElement(self, name, attrs, connection):
@@ -85,6 +85,27 @@ class TaggedEC2Object(EC2Object):
             self.tags = TagSet()
         self.tags[key] = value
 
+    def add_tags(self, tags, dry_run=False):
+        """
+        Add tags to this object.  Tags are stored by AWS and can be used
+        to organize and filter resources.  Adding tags involves a round-trip
+        to the EC2 service.
+
+        :type tags: dict
+        :param tags: A dictionary of key-value pairs for the tags being stored.
+                     If for some tags you want only the name and no value, the
+                     corresponding value for that tag name should be an empty
+                     string.
+        """
+        status = self.connection.create_tags(
+            [self.id],
+            tags,
+            dry_run=dry_run
+        )
+        if self.tags is None:
+            self.tags = TagSet()
+        self.tags.update(tags)
+
     def remove_tag(self, key, value=None, dry_run=False):
         """
         Remove a tag from this object.  Removing a tag involves a round-trip
@@ -102,7 +123,7 @@ class TaggedEC2Object(EC2Object):
                       NOTE: There is an important distinction between
                       a value of '' and a value of None.
         """
-        if value:
+        if value is not None:
             tags = {key : value}
         else:
             tags = [key]

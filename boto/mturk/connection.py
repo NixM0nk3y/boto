@@ -18,7 +18,6 @@
 # WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
-
 import xml.sax
 import datetime
 import itertools
@@ -46,7 +45,8 @@ class MTurkConnection(AWSQueryConnection):
                  is_secure=True, port=None, proxy=None, proxy_port=None,
                  proxy_user=None, proxy_pass=None,
                  host=None, debug=0,
-                 https_connection_factory=None):
+                 https_connection_factory=None, security_token=None,
+                 profile_name=None):
         if not host:
             if config.has_option('MTurk', 'sandbox') and config.get('MTurk', 'sandbox') == 'True':
                 host = 'mechanicalturk.sandbox.amazonaws.com'
@@ -54,11 +54,13 @@ class MTurkConnection(AWSQueryConnection):
                 host = 'mechanicalturk.amazonaws.com'
         self.debug = debug
 
-        AWSQueryConnection.__init__(self, aws_access_key_id,
+        super(MTurkConnection, self).__init__(aws_access_key_id,
                                     aws_secret_access_key,
                                     is_secure, port, proxy, proxy_port,
                                     proxy_user, proxy_pass, host, debug,
-                                    https_connection_factory)
+                                    https_connection_factory,
+                                    security_token=security_token,
+                                    profile_name=profile_name)
 
     def _required_auth_capability(self):
         return ['mturk']
@@ -304,7 +306,7 @@ class MTurkConnection(AWSQueryConnection):
         records, return the page numbers to be retrieved.
         """
         pages = total_records / page_size + bool(total_records % page_size)
-        return range(1, pages + 1)
+        return list(range(1, pages + 1))
 
     def get_all_hits(self):
         """
@@ -385,15 +387,15 @@ class MTurkConnection(AWSQueryConnection):
                 The number of assignments on the page in the filtered results
                 list, equivalent to the number of assignments being returned
                 by this call.
-                A non-negative integer
+                A non-negative integer, as a string.
         PageNumber
                 The number of the page in the filtered results list being
                 returned.
-                A positive integer
+                A positive integer, as a string.
         TotalNumResults
                 The total number of HITs in the filtered results list based
                 on this call.
-                A non-negative integer
+                A non-negative integer, as a string.
 
         The ResultSet will contain zero or more Assignment objects
 
@@ -826,7 +828,7 @@ class MTurkConnection(AWSQueryConnection):
         """
         body = response.read()
         if self.debug == 2:
-            print body
+            print(body)
         if '<Errors>' not in body:
             rs = ResultSet(marker_elems)
             h = handler.XmlHandler(rs, self)
@@ -875,7 +877,7 @@ class MTurkConnection(AWSQueryConnection):
         return duration
 
 
-class BaseAutoResultElement:
+class BaseAutoResultElement(object):
     """
     Base class to automatically add attributes when parsing XML
     """
@@ -955,7 +957,7 @@ class QualificationRequest(BaseAutoResultElement):
     """
 
     def __init__(self, connection):
-        BaseAutoResultElement.__init__(self, connection)
+        super(QualificationRequest, self).__init__(connection)
         self.answers = []
 
     def endElement(self, name, value, connection):
@@ -967,7 +969,7 @@ class QualificationRequest(BaseAutoResultElement):
             xml.sax.parseString(value, h)
             self.answers.append(answer_rs)
         else:
-            BaseAutoResultElement.endElement(self, name, value, connection)
+            super(QualificationRequest, self).endElement(name, value, connection)
 
 
 class Assignment(BaseAutoResultElement):
@@ -980,7 +982,7 @@ class Assignment(BaseAutoResultElement):
     """
 
     def __init__(self, connection):
-        BaseAutoResultElement.__init__(self, connection)
+        super(Assignment, self).__init__(connection)
         self.answers = []
 
     def endElement(self, name, value, connection):
@@ -992,7 +994,7 @@ class Assignment(BaseAutoResultElement):
             xml.sax.parseString(value, h)
             self.answers.append(answer_rs)
         else:
-            BaseAutoResultElement.endElement(self, name, value, connection)
+            super(Assignment, self).endElement(name, value, connection)
 
 
 class QuestionFormAnswer(BaseAutoResultElement):
@@ -1016,7 +1018,7 @@ class QuestionFormAnswer(BaseAutoResultElement):
     """
 
     def __init__(self, connection):
-        BaseAutoResultElement.__init__(self, connection)
+        super(QuestionFormAnswer, self).__init__(connection)
         self.fields = []
         self.qid = None
 
